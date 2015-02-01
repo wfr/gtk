@@ -1075,12 +1075,6 @@ templates =				\
 	ui/gtkstatusbar.ui		\
 	ui/gtkvolumebutton.ui
 
-template_headers = $(templates:.ui=.ui.h)
-
-%.ui.h: %.ui
-	$(AM_V_GEN) mkdir -p $(dir $@) \
-	&& $(top_builddir)/util/extract-strings$(EXEEXT) $< > $@
-
 #
 # rules to generate built sources
 #
@@ -1207,7 +1201,7 @@ resource_files = $(shell $(GLIB_COMPILE_RESOURCES) --sourcedir=$(srcdir) --gener
 gtkresources.h: gtk.gresource.xml
 	$(AM_V_GEN) $(GLIB_COMPILE_RESOURCES) $< \
 		--target=$@ --sourcedir=$(srcdir) --c-name _gtk --generate-header --manual-register
-gtkresources.c: gtk.gresource.xml $(resource_files) $(template_headers)
+gtkresources.c: gtk.gresource.xml $(resource_files)
 	$(AM_V_GEN) $(GLIB_COMPILE_RESOURCES) $< \
 		--target=$@ --sourcedir=$(srcdir) --c-name _gtk --generate-source --manual-register
 
@@ -1467,7 +1461,6 @@ EXTRA_DIST +=                   \
 	$(resource_files)	\
 	$(theme_sources)	\
 	$(gsettings_SCHEMAS)	\
-	$(template_headers)	\
 	a11y/Makefile.inc	\
 	deprecated/Makefile.inc	\
 	inspector/Makefile.inc	\
