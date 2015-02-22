@@ -54,6 +54,7 @@ struct _GtkGestureLongPressPrivate
   gdouble initial_x;
   gdouble initial_y;
 
+  gdouble factor;
   guint timeout_id;
   guint delay;
   guint cancelled : 1;
@@ -67,6 +68,10 @@ G_DEFINE_TYPE_WITH_PRIVATE (GtkGestureLongPress, gtk_gesture_long_press, GTK_TYP
 static void
 gtk_gesture_long_press_init (GtkGestureLongPress *gesture)
 {
+  GtkGestureLongPressPrivate *priv;
+
+  priv = gtk_gesture_long_press_get_instance_private (GTK_GESTURE_LONG_PRESS (gesture));
+  priv->factor = 1.0;
 }
 
 static gboolean
@@ -121,7 +126,10 @@ gtk_gesture_long_press_begin (GtkGesture       *gesture,
 
   widget = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (gesture));
   g_object_get (gtk_widget_get_settings (widget),
-		"gtk-long-press-time", &delay, NULL);
+                "gtk-long-press-time", &delay,
+                NULL);
+
+  delay = (gint)(priv->factor * delay);
 
   gtk_gesture_get_point (gesture, sequence,
                          &priv->initial_x, &priv->initial_y);
@@ -275,4 +283,14 @@ gtk_gesture_long_press_new (GtkWidget *widget)
   return g_object_new (GTK_TYPE_GESTURE_LONG_PRESS,
                        "widget", widget,
                        NULL);
+}
+
+void
+gtk_gesture_long_press_set_delay_factor (GtkGestureLongPress *gesture,
+                                         gdouble              factor)
+{
+  GtkGestureLongPressPrivate *priv;
+
+  priv = gtk_gesture_long_press_get_instance_private (GTK_GESTURE_LONG_PRESS (gesture));
+  priv->factor = factor;
 }

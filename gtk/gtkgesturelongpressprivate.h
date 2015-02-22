@@ -41,4 +41,7 @@ struct _GtkGestureLongPressClass
   gpointer padding[10];
 };
 
+void gtk_gesture_long_press_set_delay_factor (GtkGestureLongPress *gesture,
+                                              gdouble              factor);
+
 #endif /* __GTK_GESTURE_LONG_PRESS_PRIVATE_H__ */
