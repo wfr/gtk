@@ -1877,7 +1877,9 @@ column-header.button.dnd { // for treeview-like derive widgets
   -GtkRange-slider-width: 13;
   -GtkRange-trough-border: 1;
   -GtkScrollbar-has-backward-stepper: false;
-  -GtkScrollbar-has-forward-stepper: false;
+  -GtkScrollbar-has-forward-stepper: true;
+  -GtkScrollbar-has-secondary-backward-stepper: true;
+  -GtkScrollbar-has-secondary-forward-stepper: false;
   -GtkScrollbar-min-slider-length: 42; // minimum size for the slider.
                                        // sadly can't be in '.slider'
                                        // where it belongs
@@ -1894,6 +1896,10 @@ column-header.button.dnd { // for treeview-like derive widgets
   &.overlay-indicator {
     &:not(.dragging):not(.hovering) { // Overlay scrolling indicator
       opacity: 0.3;
+      -GtkScrollbar-has-backward-stepper: false;
+      -GtkScrollbar-has-forward-stepper: false;
+      -GtkScrollbar-has-secondary-backward-stepper: false;
+      -GtkScrollbar-has-secondary-forward-stepper: false;
 
       -GtkRange-slider-width: 5px;
 
