@@ -73,7 +73,6 @@ typedef enum {
 
 #define BUTTON_DATA(x) ((ButtonData *)(x))
 
-#define SCROLL_DELAY_FACTOR 5
 #define INITIAL_SCROLL_TIMEOUT 500
 #define SCROLL_TIMEOUT         50
 
@@ -1059,11 +1058,10 @@ gtk_path_bar_scroll_timeout (GtkPathBar *path_bar)
 	{
 	  path_bar->priv->need_timer = FALSE;
 
-	  path_bar->priv->timer = gdk_threads_add_timeout (TIMEOUT_REPEAT * SCROLL_DELAY_FACTOR,
-					   (GSourceFunc)gtk_path_bar_scroll_timeout,
-					   path_bar);
-          g_source_set_name_by_id (path_bar->priv->timer, "[gtk+] gtk_path_bar_scroll_timeout");
-	}
+          path_bar->priv->timer = g_timeout_add (SCROLL_TIMEOUT,
+                                                (GSourceFunc)gtk_path_bar_scroll_timeout,
+                                                path_bar);
+        }
       else
 	retval = TRUE;
     }
@@ -1164,10 +1162,9 @@ gtk_path_bar_slider_button_press (GtkWidget      *widget,
   if (!path_bar->priv->timer)
     {
       path_bar->priv->need_timer = TRUE;
-      path_bar->priv->timer = gdk_threads_add_timeout (INITIAL_SCROLL_TIMEOUT,
-				       (GSourceFunc)gtk_path_bar_scroll_timeout,
-				       path_bar);
-      g_source_set_name_by_id (path_bar->priv->timer, "[gtk+] gtk_path_bar_scroll_timeout");
+      path_bar->priv->timer =  g_timeout_add (INITIAL_SCROLL_TIMEOUT,
+                                              (GSourceFunc) gtk_path_bar_scroll_timeout,
+                                              path_bar);
     }
 
   return FALSE;
