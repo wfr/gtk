@@ -1050,20 +1050,20 @@ gtk_path_bar_scroll_timeout (GtkPathBar *path_bar)
   if (path_bar->priv->timer)
     {
       if (path_bar->priv->scrolling_up)
-	gtk_path_bar_scroll_up (path_bar);
+        gtk_path_bar_scroll_up (path_bar);
       else if (path_bar->priv->scrolling_down)
-	gtk_path_bar_scroll_down (path_bar);
+        gtk_path_bar_scroll_down (path_bar);
 
       if (path_bar->priv->need_timer) 
-	{
-	  path_bar->priv->need_timer = FALSE;
+        {
+          path_bar->priv->need_timer = FALSE;
 
           path_bar->priv->timer = g_timeout_add (SCROLL_TIMEOUT,
                                                 (GSourceFunc)gtk_path_bar_scroll_timeout,
                                                 path_bar);
         }
       else
-	retval = TRUE;
+      retval = TRUE;
     }
 
   return retval;
