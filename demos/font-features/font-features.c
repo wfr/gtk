@@ -63,7 +63,7 @@ update (void)
   gtk_label_set_text (GTK_LABEL (settings), font_settings);
 
   s = g_string_new ("");
-  g_string_append_printf (s, "<span font_desc='%s' font_feature_settings='%s'>%s</span>", font_desc, font_settings, text);
+  g_string_append_printf (s, "<span font_desc='%s' font_features='%s'>%s</span>", font_desc, font_settings, text);
 
   gtk_label_set_markup (GTK_LABEL (label), s->str);
 
