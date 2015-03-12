@@ -155,11 +155,7 @@ static void gtk_path_bar_on_file_changed (GFileMonitor      *monitor,
                                           GFile             *new_file,
                                           GFileMonitorEvent  event_type,
                                           gpointer          *user_data);
-static void gtk_path_bar_button_data_update_path (ButtonData *button_data,
-                                                  GFile      *updated_file);
-static void gtk_path_bar_file_changed_on_get_info (GObject      *object,
-                                                   GAsyncResult *result,
-                                                   gpointer      user_data);
+static void gtk_path_bar_update_path_async (GTask *task);
 
 static void
 gtk_path_bar_init (GtkPathBar *path_bar)
@@ -1572,7 +1568,7 @@ gtk_path_bar_get_button_child (GtkPathBar *path_bar,
   g_return_val_if_fail (button_data != NULL, NULL);
 
   list = g_list_find (path_bar->priv->button_list, button_data);
-  result = list->prev!= NULL? list->prev->data : NULL;
+  result = list->prev != NULL? list->prev->data : NULL;
 
   return result;
 }
@@ -1605,12 +1601,66 @@ gtk_path_bar_button_data_monitor_file (ButtonData *button_data)
 		                                                      button_data);
 }
 
-struct _FileInfoExtraData {
-  GtkPathBar *path_bar;
-  GCallback *callback;
-  ButtonData *button_data;
+static void
+gtk_path_bar_remove_dangling_buttons (GtkPathBar *path_bar,
+                                      ButtonData *button_data,
+                                      GFile      *new_file)
+{
+  GList *new_list;
+  GList *l;
+  GList *next;
+  GFile *new_parent;
 
-} FileInfoExtraData
+  l = g_list_find (path_bar->priv->button_list, button_data);
+  g_return_if_fail (l != NULL);
+  new_parent = g_file_get_parent (new_file);
+
+  /* Start in the next outermost button after the one that actually changed */
+  l = l->next;
+  while (l != NULL)
+    {
+      g_print ("while %s, %s\n", g_file_get_uri (BUTTON_DATA (l->data)->file), g_file_get_uri (new_parent));
+      if (g_file_has_prefix (BUTTON_DATA (l->data)->file, new_parent))
+        {
+          next = l->next;
+          g_print ("inside\n");
+          new_list = g_list_remove (path_bar->priv->button_list, l->data);
+          l = next;
+        }
+      else
+        {
+          child_ordering_changed (path_bar);
+          break;
+        }
+    }
+
+  g_object_unref (new_parent);
+}
+
+typedef struct  _UpdatePathData {
+  GFile *updated_file;
+  ButtonData *button_data;
+} UpdatePathData;
+
+static void
+update_path_data_free (UpdatePathData *update_path_data)
+{
+  /* Doesn't free the button data, since that's managed
+   * by the GtkPathBar */
+  g_object_unref (update_path_data->updated_file);
+  g_slice_free (UpdatePathData, update_path_data);
+}
+
+static void
+gtk_path_bar_on_file_finished (GObject      *object,
+                               GAsyncResult *result,
+                               gpointer      user_data)
+{
+  g_print ("callback called!\n");
+  GtkPathBar *path_bar;
+
+  path_bar = GTK_PATH_BAR (object);
+}
 
 static void
 gtk_path_bar_update_path_on_get_info (GObject      *object,
@@ -1618,21 +1668,25 @@ gtk_path_bar_update_path_on_get_info (GObject      *object,
                                       gpointer      user_data)
 {
   const gchar *display_name;
-  FileInfoExtraData *file_info_data;
   ButtonData *button_data;
   ButtonData *child_button_data;
+  UpdatePathData *update_path_data;
+  UpdatePathData *new_update_path_data;
+  GTask *task;
   GtkPathBar *path_bar;
-  GFile *updated_file;
   GFileInfo *info;
   GFile *file;
+  gchar *child_basename;
+  GFile *updated_child_file;
 
-  g_print ("before button data %s\n", g_file_get_uri (file));
 
-  file_info_data = BUTTON_DATA (user_data);
-  button_data = file_info_data->button_data;
+  task = (GTask*) user_data;
+  update_path_data = (UpdatePathData *) g_task_get_task_data (task);
+  button_data = update_path_data->button_data;
   file = G_FILE (object);
+  g_print ("before button data %s\n", g_file_get_uri (file));
   info = g_file_query_info_finish (file, result, NULL);
-  path_bar = file_info_data->path_bar;
+  path_bar = GTK_PATH_BAR (g_task_get_source_object (task));
 
   g_return_if_fail (info != NULL);
   g_return_if_fail (path_bar != NULL);
@@ -1648,95 +1702,82 @@ gtk_path_bar_update_path_on_get_info (GObject      *object,
   gtk_path_bar_update_button_appearance (button_data);
   g_print ("updated appearance\n");
 
-  /* Update recursively if there is children */
+  /* Update recursively if there is a child */
   child_button_data = gtk_path_bar_get_button_child (path_bar, button_data);
   g_print ("child data ok\n");
   if (child_button_data != NULL)
     {
-      gchar *child_basename;
-
+      /* Set the children button data for operating on the next button */
+      new_update_path_data = g_slice_new (UpdatePathData);
       child_basename = g_file_get_basename (child_button_data->file);
-      updated_file = g_file_get_child (file, child_basename);
-      gtk_path_data_update_path (child_button_data, updated_file);
+      updated_child_file = g_file_get_child (button_data->file, child_basename);
+      new_update_path_data->updated_file = g_object_ref (updated_child_file);
+      new_update_path_data->button_data = child_button_data;
+      g_task_set_task_data (task, new_update_path_data,
+                            (GDestroyNotify) update_path_data_free);
+
+      gtk_path_bar_update_path_async (task);
     }
   else
     {
-      file_info->callback();
       g_print ("null ended\n");
+      /* No more button, we finished */
+      g_task_return_pointer (task, NULL, NULL);
     }
 
   g_object_unref (info);
 }
 
-
 static void
-gtk_path_bar_on_file_finished ()
+gtk_path_bar_update_path_async (GTask *task)
 {
-
-}
-
-static void
-gtk_path_bar_update_path (ButtonData *button_data,
-                          GFile      *updated_file,
-                          GCallback  *callback)
-{
-  FileInfoExtraData extra_data;
+  ButtonData *button_data;
+  UpdatePathData *update_path_data;
   GtkPathBar *path_bar;
 
-  path_bar = (gtkpathbar *) gtk_widget_get_ancestor (button_data->button,
-                                                     gtk_type_path_bar);
-  g_return_if_fail (path_bar != NULL);
+  update_path_data = (UpdatePathData *) g_task_get_task_data (task);
+  path_bar = GTK_PATH_BAR (g_task_get_source_object (task));
 
-  extra_data->button_data = button_data;
-  extra_data->path_bar = path_bar;
-  extra_data->callback = callback;
+  button_data = BUTTON_DATA (update_path_data->button_data);
 
+  /* Replace the old file with the new one */
+  if (g_file_equal (path_bar->priv->current_path, button_data->file))
+    {
+      path_bar->priv->current_path = update_path_data->updated_file;
+    }
   gtk_path_bar_button_data_unmonitor_file (button_data);
-  button_data->file= g_object_ref (updated_file);
+  button_data->file= g_object_ref (update_path_data->updated_file);
   gtk_path_bar_button_data_monitor_file (button_data);
 
-  g_print ("asking info for %s\n", g_file_get_uri (updated_file));
-  g_file_query_info_async (updated_file,
+  g_print ("asking info for %s\n", g_file_get_uri (button_data->file));
+  /* Ask for the user friendly name (display-name) and update the button label */
+  g_file_query_info_async (button_data->file,
                            "standard::display-name",
                            G_FILE_QUERY_INFO_NONE,
                            G_PRIORITY_DEFAULT,
                            NULL,
                            gtk_path_bar_update_path_on_get_info,
-                           extra_data);
+                           task);
 }
 
 static void
-gtk_path_bar_move_path (GtkPathBar *path_bar,
-                        ButtonData *button_data,
-                        GFile      *new_file)
+gtk_path_bar_update_path (GtkPathBar          *path_bar,
+                          ButtonData          *button_data,
+                          GFile               *updated_file,
+                          GAsyncReadyCallback  callback)
 {
-  ButtonData *dangling_button;
-  GList *l;
-  GList *next;
-  GFile *new_parent;
+  GTask *task;
+  UpdatePathData *update_path_data;
 
-  l = g_list_find (path_bar->priv->button_list, button_data);
-  g_return_if_fail (l != NULL);
-  l = l->next;
-  new_parent = g_file_get_parent (new_file);
+  update_path_data = g_slice_new (UpdatePathData);
+  update_path_data->updated_file = g_object_ref (updated_file);
+  update_path_data->button_data = button_data;
 
-  while (l != NULL)
-    {
-      if (g_file_has_prefix (l->data->file, new_parent))
-        {
-          next = l->next;
-          dangling_button = g_list_remove (path_bar->priv->button_list, l->data);
-          gtk_widget_destroy (dangling_button->button);
-          g_object_unref (dangling_button);
-          l = next;
-        }
-      else
-        {
-          break;
-        }
-    }
+  task = g_task_new (path_bar, NULL, callback, update_path_data);
+  g_task_set_task_data (task, update_path_data,
+                        (GDestroyNotify) update_path_data_free);
 
-  g_object_unref (new_parent);
+  gtk_path_bar_update_path_async (task);
 }
 
 static void
@@ -1748,12 +1789,14 @@ gtk_path_bar_on_file_changed (GFileMonitor      *monitor,
 {
   GFile *new_file_parent, *old_file_parent;
   ButtonData *button_data;
+  ButtonData *innermost_button_data;
+  GFile *innermost_path;
   GtkPathBar *path_bar;
-  gboolean renamed, child_moved;
+  gboolean renamed;
 
   button_data = BUTTON_DATA (user_data);
-  path_bar = (gtkpathbar *) gtk_widget_get_ancestor (button_data->button,
-                                                     gtk_type_path_bar);
+  path_bar = (GtkPathBar*) gtk_widget_get_ancestor (button_data->button,
+                                                    GTK_TYPE_PATH_BAR);
   g_print ("event type %i\n", event_type);
   g_print ("gtk_path_bar_on_file_changed %s, %s, %s\n", g_file_get_uri (file), g_file_get_uri (button_data->file), g_file_get_uri (path_bar->priv->current_path));
   if (path_bar == NULL)
@@ -1763,8 +1806,19 @@ gtk_path_bar_on_file_changed (GFileMonitor      *monitor,
 
   g_assert (path_bar->priv->current_path!= NULL);
 
+  innermost_button_data = path_bar->priv->button_list->data;
+  innermost_path = innermost_button_data->file;
+
+  /* If the change doesn't affect directly any file in the path bar, don't do anything.
+   * This happens when one of the random children files of one of the folders in
+   * the path bar is modified, but that modified children file is not a children
+   * in the hierarchy of the pathbar. */
+  if (!g_file_has_prefix (innermost_path, file) && !g_file_equal (file, innermost_path))
+    return;
+
   if (event_type == G_FILE_MONITOR_EVENT_MOVED)
     {
+
       old_file_parent = g_file_get_parent (file);
       new_file_parent = g_file_get_parent (new_file);
       g_print ("new file %s\n", g_file_get_uri (new_file));
@@ -1783,7 +1837,8 @@ gtk_path_bar_on_file_changed (GFileMonitor      *monitor,
 
           renamed_button_data = gtk_path_bar_find_button_from_file (path_bar, file);
           g_return_if_fail (renamed_button_data != NULL);
-          gtk_path_bar_update_path (renamed_button_data, new_file, G_CALLBACK (gtk_path_bar_on_file_finished));
+          gtk_path_bar_update_path (path_bar, renamed_button_data, new_file,
+                                   (GAsyncReadyCallback) gtk_path_bar_on_file_finished);
         }
       else
         {
@@ -1804,12 +1859,12 @@ gtk_path_bar_on_file_changed (GFileMonitor      *monitor,
                * parent.
                * 2- Rename buttons from the modified one to the innermost button */
               ButtonData *renamed_button_data;
-              GFile *new_parent;
 
               renamed_button_data = gtk_path_bar_find_button_from_file (path_bar, file);
               g_assert (renamed_button_data != NULL);
-              gtk_path_bar_move_path (button_data, new_file);
-              gtk_path_bar_button_data_update_path (renamed_button_data, new_file);
+              gtk_path_bar_remove_dangling_buttons (path_bar, renamed_button_data, new_file);
+              gtk_path_bar_update_path (path_bar, renamed_button_data, new_file,
+                                        (GAsyncReadyCallback) gtk_path_bar_on_file_finished);
               //g_object_unref (path_bar->priv->current_path);
               //path_bar->priv->current_path = g_object_ref (new_file);
               //_gtk_path_bar_set_file (path_bar, current_path, FALSE);
@@ -2021,6 +2076,7 @@ gtk_path_bar_set_file_finish (struct SetFileInfo *info,
   g_free (info);
 }
 
+#if 0
 static void
 gtk_path_bar_update_path (GtkPathBar *path_bar,
                           GFile      *file)
@@ -2092,6 +2148,7 @@ gtk_path_bar_fetch_info (GtkPathBar *path_bar,
                            gtk_path_bar_get_info_callback,
                            info);
 }
+#endif
 
 static void
 gtk_path_bar_get_info_callback (GObject      *source,
